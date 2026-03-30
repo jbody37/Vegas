@@ -136,6 +136,8 @@ select option{background:var(--bg2)}
 .btn-reset:hover{background:rgba(192,57,43,.35)}
 .btn-print{background:rgba(240,204,48,.12);color:var(--gold);border:1px solid rgba(240,204,48,.35)}
 .btn-print:hover{background:rgba(240,204,48,.22)}
+.btn-export{background:rgba(94,186,72,.15);color:var(--green-lt);border:1px solid rgba(94,186,72,.4)}
+.btn-export:hover{background:rgba(94,186,72,.28)}
 .btn-set-partners{background:rgba(91,200,240,.15);color:var(--p0);border:1px solid rgba(91,200,240,.4);font-size:.72rem;padding:.35rem .8rem}
 .btn-set-partners:hover{background:rgba(91,200,240,.28)}
 
@@ -430,6 +432,7 @@ td.pts-push{color:var(--text-faint);font-style:italic;font-size:.6rem}
     <div><div class="course-title" id="gameCourseName">—</div><div class="course-subtitle" id="gameCourseInfo">—</div></div>
     <div class="actions-row">
       <button class="btn-sm btn-set-partners" id="setMiddleBtn" onclick="openMiddleModal()" style="display:none">Set Middle 6 Teams</button>
+      <button class="btn-sm btn-export" onclick="exportToExcel()">📊 Export Excel</button>
       <button class="btn-sm btn-print" onclick="window.print()">🖨 Print</button>
       <button class="btn-sm btn-reset" onclick="resetGame()">↩ New Game</button>
     </div>
@@ -950,8 +953,8 @@ function recalc(){
     const sapts=document.getElementById(`seg_apts_${si}`),sbpts=document.getElementById(`seg_bpts_${si}`);
     if(sapts)sapts.textContent=`${runA} pts`;if(sbpts)sbpts.textContent=`${runB} pts`;
     const netSeg=(runA-runB)*G.bet;
-    if(netSeg>0){seg.teamA.forEach(pi=>playerTotals[pi]+=netSeg/2);seg.teamB.forEach(pi=>playerTotals[pi]-=netSeg/2);}
-    else if(netSeg<0){seg.teamB.forEach(pi=>playerTotals[pi]+=Math.abs(netSeg)/2);seg.teamA.forEach(pi=>playerTotals[pi]-=Math.abs(netSeg)/2);}
+    if(netSeg>0){seg.teamA.forEach(pi=>playerTotals[pi]+=netSeg);seg.teamB.forEach(pi=>playerTotals[pi]-=netSeg);}
+    else if(netSeg<0){seg.teamB.forEach(pi=>playerTotals[pi]+=Math.abs(netSeg));seg.teamA.forEach(pi=>playerTotals[pi]-=Math.abs(netSeg));}
   }
   const maxAmt=Math.max(...playerTotals);
   G.players.forEach((_,pi)=>{
@@ -1026,7 +1029,228 @@ function resetGame(){
   document.getElementById('setup').style.display='block';
 }
 
-// ─── GAME STATE PERSISTENCE ───────────────
+// ─── EXCEL EXPORT ─────────────────────────
+function exportToExcel(){
+  const wb = XLSX.utils.book_new();
+
+  // ── Helpers ──
+  const playerNames = G.players;
+  const numHoles = G.holes;
+
+  // Net score: -1 if playerHdcp >= holeHdcp
+  function net(gross, pi, h){
+    if(gross===null) return null;
+    return gross - (G.playerHdcps[pi] >= (G.hdcps[h]||0) ? 1 : 0);
+  }
+
+  // Which segment does this hole belong to?
+  function segFor(h){
+    return G.segments.find(s=>s&&s.holes.includes(h))||null;
+  }
+
+  // Vegas combo for a team using net scores
+  function vegasCombo(nets, hasBirdieOpponent){
+    const [a,b] = nets;
+    if(a===null||b===null) return null;
+    const lo=Math.min(a,b), hi=Math.max(a,b);
+    return hasBirdieOpponent ? hi*10+lo : lo*10+hi;
+  }
+
+  // ── Build data rows ──
+  // Header row 1: title
+  const date = new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const titleRows = [
+    [`Vegas 6-6-6 Scorecard — ${G.courseName}`, ...Array(22).fill('')],
+    [`Date: ${date}   Bet: $${G.bet}/pt`, ...Array(22).fill('')],
+    [],
+  ];
+
+  // Column layout:
+  // Col A: Label
+  // Cols B-J: Holes 1-9  (indices 0-8)
+  // Col K: Front 9 Total
+  // Cols L-T: Holes 10-18 (indices 9-17)
+  // Col U: Back 9 Total
+  // Col V: 18-hole Total
+
+  const holeNums9  = Array.from({length:9},(_,i)=>i);    // 0-8
+  const holeNums18 = Array.from({length:9},(_,i)=>i+9);  // 9-17
+
+  // Helper: build a row of 23 cells [label, h1..h9, front9, h10..h18, back9, total]
+  function makeRow(label, vals9, front9, vals18, back9, total){
+    return [label, ...vals9, front9, ...vals18, back9, total];
+  }
+
+  // ── Column header row ──
+  const hdrRow = makeRow(
+    'Hole',
+    holeNums9.map(h=>h+1),
+    'OUT',
+    holeNums18.map(h=>h+1),
+    'IN',
+    'TOT'
+  );
+
+  // ── Handicap row ──
+  const hdcpRow = makeRow(
+    'Hole Hdcp',
+    holeNums9.map(h=>G.hdcps[h]||''),
+    '',
+    holeNums18.map(h=>G.hdcps[h]||''),
+    '',
+    ''
+  );
+
+  // ── Par row ──
+  const parFront = holeNums9.reduce((s,h)=>s+(G.pars[h]||4),0);
+  const parBack  = holeNums18.reduce((s,h)=>s+(G.pars[h]||4),0);
+  const parRow = makeRow(
+    'Par',
+    holeNums9.map(h=>G.pars[h]||4),
+    parFront,
+    holeNums18.map(h=>G.pars[h]||4),
+    parBack,
+    parFront+parBack
+  );
+
+  // ── Per-player rows: gross + net ──
+  const playerRows = [];
+  playerNames.forEach((name,pi)=>{
+    // Gross
+    const gross9  = holeNums9.map(h=>G.scores[h][pi]);
+    const gross18 = holeNums18.map(h=>G.scores[h][pi]);
+    const gFront  = gross9.reduce((s,v)=>s+(v||0),0)||'';
+    const gBack   = gross18.reduce((s,v)=>s+(v||0),0)||'';
+    const gTot    = (gFront||0)+(gBack||0)||'';
+    playerRows.push(makeRow(
+      `${name} (Hdcp ${G.playerHdcps[pi]}) — Gross`,
+      gross9.map(v=>v??''),
+      gFront, gross18.map(v=>v??''), gBack, gTot
+    ));
+
+    // Net
+    const net9  = holeNums9.map(h=>net(G.scores[h][pi],pi,h));
+    const net18 = holeNums18.map(h=>net(G.scores[h][pi],pi,h));
+    const nFront = net9.reduce((s,v)=>s+(v??0),0)||'';
+    const nBack  = net18.reduce((s,v)=>s+(v??0),0)||'';
+    const nTot   = (nFront||0)+(nBack||0)||'';
+    playerRows.push(makeRow(
+      `${name} — Net`,
+      net9.map(v=>v??''),
+      nFront, net18.map(v=>v??''), nBack, nTot
+    ));
+  });
+
+  // ── Vegas scoring rows per segment ──
+  const vegasRows = [];
+  vegasRows.push([]); // spacer
+  vegasRows.push(['VEGAS SCORING — Points per hole', ...Array(22).fill('')]);
+
+  G.segments.forEach((seg,si)=>{
+    if(!seg) return;
+    const tAn = seg.teamA.map(i=>playerNames[i].split(' ')[0]).join(' & ');
+    const tBn = seg.teamB.map(i=>playerNames[i].split(' ')[0]).join(' & ');
+    vegasRows.push([`${seg.label} (${seg.range}): ${tAn}  vs  ${tBn}`, ...Array(22).fill('')]);
+
+    // One row: Combo A, Combo B, Points, Running pts
+    const comboARow = ['  Combo ('+tAn+')'];
+    const comboBRow = ['  Combo ('+tBn+')'];
+    const ptsRow    = ['  Points won'];
+    let runA=0, runB=0;
+    const runRow    = ['  Running pts (A leads)'];
+
+    for(let col=0; col<23; col++){
+      // col 0 = label (handled), cols 1-9 = holes 0-8, col 10 = OUT, cols 11-19 = holes 9-17, col 20 = IN, col 21 = TOT
+      if(col===0) continue;
+      const isOut = col===10, isIn=col===20, isTot=col===21;
+      if(isOut||isIn||isTot){comboARow.push('');comboBRow.push('');ptsRow.push(isOut&&si===0||isIn&&si===1?runA+runB:'');runRow.push('');continue;}
+      const h = col<=9 ? col-1 : col-2; // map col to hole index
+      if(!seg.holes.includes(h)){comboARow.push('');comboBRow.push('');ptsRow.push('');runRow.push('');continue;}
+
+      const nA = seg.teamA.map(pi=>net(G.scores[h][pi],pi,h));
+      const nB = seg.teamB.map(pi=>net(G.scores[h][pi],pi,h));
+      const allIn = G.scores[h].every(s=>s!==null);
+      const bA = nA.some(v=>v!==null&&v<(G.pars[h]||4));
+      const bB = nB.some(v=>v!==null&&v<(G.pars[h]||4));
+      const cA = (nA[0]!==null&&nA[1]!==null) ? vegasCombo(nA,bB) : null;
+      const cB = (nB[0]!==null&&nB[1]!==null) ? vegasCombo(nB,bA) : null;
+      comboARow.push(cA??'');
+      comboBRow.push(cB??'');
+      if(allIn&&cA!==null&&cB!==null){
+        const diff=Math.abs(cA-cB);
+        ptsRow.push(diff);
+        if(cA<cB) runA+=diff; else if(cB<cA) runB+=diff;
+        runRow.push(runA>runB?`A +${runA-runB}`:runB>runA?`B +${runB-runA}`:'Even');
+      } else {
+        ptsRow.push(''); runRow.push('');
+      }
+    }
+    vegasRows.push(comboARow,comboBRow,ptsRow,runRow);
+  });
+
+  // ── Segment summary ──
+  const summaryRows = [];
+  summaryRows.push([]);
+  summaryRows.push(['SEGMENT RESULTS', ...Array(22).fill('')]);
+  summaryRows.push(['Segment','Teams','Pts A','Pts B','Result ($)','','','','','','','','','','','','','','','','','','']);
+
+  G.segments.forEach((seg,si)=>{
+    if(!seg) return;
+    const tAn = seg.teamA.map(i=>playerNames[i].split(' ')[0]).join(' & ');
+    const tBn = seg.teamB.map(i=>playerNames[i].split(' ')[0]).join(' & ');
+    let runA=0,runB=0;
+    seg.holes.filter(h=>h<G.holes).forEach(h=>{
+      const nA=seg.teamA.map(pi=>net(G.scores[h][pi],pi,h));
+      const nB=seg.teamB.map(pi=>net(G.scores[h][pi],pi,h));
+      const allIn=G.scores[h].every(s=>s!==null);
+      if(!allIn||nA.includes(null)||nB.includes(null)) return;
+      const bA=nA.some(v=>v<(G.pars[h]||4)), bB=nB.some(v=>v<(G.pars[h]||4));
+      const cA=vegasCombo(nA,bB), cB=vegasCombo(nB,bA);
+      if(cA===null||cB===null) return;
+      const diff=Math.abs(cA-cB);
+      if(cA<cB) runA+=diff; else if(cB<cA) runB+=diff;
+    });
+    const net$=(runA-runB)*G.bet;
+    const result=net$>0?`${tAn} +$${net$.toFixed(2)}`:net$<0?`${tBn} +$${Math.abs(net$).toFixed(2)}`:'Push';
+    summaryRows.push([seg.label,`${tAn} vs ${tBn}`,runA,runB,result,'','','','','','','','','','','','','','','','','','']);
+  });
+
+  // ── Assemble all rows ──
+  const allRows = [
+    ...titleRows,
+    hdrRow, hdcpRow, parRow,
+    [],
+    ...playerRows,
+    ...vegasRows,
+    ...summaryRows,
+  ];
+
+  // ── Create worksheet ──
+  const ws = XLSX.utils.aoa_to_sheet(allRows);
+
+  // ── Column widths ──
+  ws['!cols'] = [
+    {wch:32},  // label
+    ...Array(9).fill({wch:6}),  // holes 1-9
+    {wch:7},   // OUT
+    ...Array(9).fill({wch:6}),  // holes 10-18
+    {wch:7},   // IN
+    {wch:7},   // TOT
+  ];
+
+  // ── Basic cell styling via SheetJS (limited without pro) ──
+  // Merge title cell across all columns
+  if(!ws['!merges']) ws['!merges']=[];
+  ws['!merges'].push({s:{r:0,c:0},e:{r:0,c:22}});
+  ws['!merges'].push({s:{r:1,c:0},e:{r:1,c:22}});
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Scorecard');
+
+  // ── Download ──
+  const fname = `Vegas_6-6-6_${G.courseName.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, fname);
+}
+
 const GK='vegas666_game';
 
 function saveGame(){
