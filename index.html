@@ -299,6 +299,7 @@ td.pts-push{color:var(--text-faint);font-style:italic;font-size:.6rem}
 .step-btn:active{background:rgba(255,255,255,.18)}
 .step-val{width:40px;text-align:center;font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--white);border-left:1px solid rgba(255,255,255,.1);border-right:1px solid rgba(255,255,255,.1);line-height:1;user-select:none;font-weight:700}
 .step-val.empty{color:rgba(255,255,255,.2);font-size:.88rem;font-weight:400}
+.step-val.default{color:rgba(255,255,255,.4);font-style:italic}
 .sdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .sd-eagle{background:var(--gold)}.sd-birdie{background:var(--p0)}.sd-par{background:rgba(255,255,255,.18)}.sd-bogey{background:var(--p2)}.sd-double{background:var(--p3)}
 .popup-done{display:block;width:calc(100% - 1.5rem);margin:.1rem .75rem .7rem;padding:.65rem;border:none;border-radius:7px;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:.1em;background:linear-gradient(135deg,var(--gold),var(--gold-dk));color:#0d1a0d;cursor:pointer;font-weight:700}
@@ -853,10 +854,14 @@ function rebuildScoreSection(si){
   }
   const tAn=seg.teamA.map(i=>G.players[i].split(' ')[0]).join(' & ');
   const tBn=seg.teamB.map(i=>G.players[i].split(' ')[0]).join(' & ');
+  const isLast = si===2;
   wrapper.innerHTML=`<div class="scorecard-section">
     <div class="section-label">${seg.label} — ${seg.range} <span class="section-teams-tag">${tAn} vs ${tBn}</span></div>
     <div class="sc-wrap"><table class="scorecard"><colgroup><col class="col-label"><col class="col-hole" span="6"><col class="col-sub"></colgroup><tbody id="tb_${si}"></tbody></table></div>
-  </div>`;
+  </div>${isLast ? `<div class="scorecard-section" style="margin-top:.5rem">
+    <div class="section-label">Round Totals</div>
+    <div class="sc-wrap"><table class="scorecard"><colgroup><col class="col-label"><col class="col-sub"><col class="col-sub"><col class="col-sub"></colgroup><tbody id="tb_totals"></tbody></table></div>
+  </div>` : ''}`;
   buildSegTable(`tb_${si}`,si);
 }
 
@@ -868,7 +873,8 @@ function buildSegTable(tbId,si){
 
   const rH=mtr('row-hole-nums');rH.appendChild(mtd('lbl','HOLE'));
   holeNums.forEach(h=>rH.appendChild(mtd('',h+1)));
-  rH.appendChild(mtd('subtotal','OUT'));tb.appendChild(rH);
+  rH.appendChild(mtd('subtotal',si===0?'OUT':si===1?'MID':'B9'));
+  tb.appendChild(rH);
 
   const rHd=mtr('row-hdcp');rHd.appendChild(mtd('lbl','HDCP'));
   holeNums.forEach(h=>rHd.appendChild(mtd('',G.hdcps[h]||'')));
@@ -878,9 +884,7 @@ function buildSegTable(tbId,si){
   holeNums.forEach(h=>{
     const hb=(G.holeBets&&G.holeBets[h]!=null)?G.holeBets[h]:G.bet;
     const cell=mtd('',`$${hb%1===0?hb:hb.toFixed(2)}`);
-    cell.id=`bet_${h}`;
-    styleBetCell(cell,hb);
-    rBet.appendChild(cell);
+    cell.id=`bet_${h}`; styleBetCell(cell,hb); rBet.appendChild(cell);
   });
   rBet.appendChild(mtd('subtotal',''));tb.appendChild(rBet);
 
@@ -924,6 +928,43 @@ function buildSegTable(tbId,si){
   const rRun=mtr('row-run');rRun.appendChild(mtd('lbl','running $'));
   holeNums.forEach(h=>{const c=document.createElement('td');c.id=`run_${h}`;rRun.appendChild(c);});
   rRun.appendChild(mtd('subtotal',''));tb.appendChild(rRun);
+
+  // Build separate totals table after Last 6
+  if(si===2) buildTotalsTable();
+}
+
+function buildTotalsTable(){
+  const tb=document.getElementById('tb_totals');if(!tb)return;
+  tb.innerHTML='';
+
+  // Header
+  const rH=mtr('row-hole-nums');
+  rH.appendChild(mtd('lbl','GROSS TOTALS'));
+  rH.appendChild(mtd('subtotal','F9'));
+  rH.appendChild(mtd('subtotal','B9'));
+  rH.appendChild(mtd('subtotal','TOT'));
+  tb.appendChild(rH);
+
+  // Par row
+  const f9Par=[0,1,2,3,4,5,6,7,8].reduce((a,h)=>a+(G.pars[h]||4),0);
+  const b9Par=[9,10,11,12,13,14,15,16,17].reduce((a,h)=>a+(G.pars[h]||4),0);
+  const rP=mtr('row-par');
+  rP.appendChild(mtd('lbl','PAR'));
+  rP.appendChild(mtd('subtotal sub-gold',f9Par));
+  rP.appendChild(mtd('subtotal sub-gold',b9Par));
+  rP.appendChild(mtd('subtotal sub-gold',f9Par+b9Par));
+  tb.appendChild(rP);
+
+  // Player rows
+  G.players.forEach((name,pi)=>{
+    const row=mtr(`row-player ${BCCLS[pi]}`);
+    row.appendChild(mtd(`lbl ${PCLS[pi]}`,name+(G.playerHdcps[pi]?` (${G.playerHdcps[pi]})`:'')));
+    const f9td=document.createElement('td');f9td.id=`f9_${pi}`;f9td.className=`subtotal ${PCLS[pi]}`;f9td.textContent='—';
+    const b9td=document.createElement('td');b9td.id=`b9_${pi}`;b9td.className=`subtotal ${PCLS[pi]}`;b9td.textContent='—';
+    const tottd=document.createElement('td');tottd.id=`tot18_${pi}`;tottd.className=`subtotal ${PCLS[pi]}`;tottd.style.fontWeight='700';tottd.textContent='—';
+    row.appendChild(f9td);row.appendChild(b9td);row.appendChild(tottd);
+    tb.appendChild(row);
+  });
 }
 
 function mtr(cls){const r=document.createElement('tr');if(cls)r.className=cls;return r;}
@@ -934,6 +975,10 @@ function nScore(gross,pHdcp,hHdcp){if(gross===null)return null;return gross-(pHd
 
 function recalc(){
   const playerTotals=[0,0,0,0];
+  // Track gross per player per hole-group for F9/B9/TOT
+  const grossF9=[0,0,0,0], grossB9=[0,0,0,0], grossTot=[0,0,0,0];
+  const hasF9=[false,false,false,false], hasB9=[false,false,false,false];
+
   for(let si=0;si<3;si++){
     const seg=G.segments[si];if(!seg)continue;
     let runA=0,runB=0,runA$=0,runB$=0,segPts=0;
@@ -950,7 +995,12 @@ function recalc(){
         cell.innerHTML=s!==null
           ?`<span class="sv-wrap"><span class="sv">${s}</span></span>`
           :`<span class="sv-wrap"><span class="sv empty">·</span></span>`;
-        if(s!==null)subG[pi]+=s;
+        if(s!==null){
+          subG[pi]+=s;
+          if(h<9){grossF9[pi]+=s;hasF9[pi]=true;}
+          else{grossB9[pi]+=s;hasB9[pi]=true;}
+          grossTot[pi]+=s;
+        }
       });
       gross.forEach((s,pi)=>{
         const nc=document.getElementById(`net_${h}_${pi}`);if(!nc)return;
@@ -1003,6 +1053,16 @@ function recalc(){
     if(netSeg>0){seg.teamA.forEach(pi=>playerTotals[pi]+=netSeg);seg.teamB.forEach(pi=>playerTotals[pi]-=netSeg);}
     else if(netSeg<0){seg.teamB.forEach(pi=>playerTotals[pi]+=Math.abs(netSeg));seg.teamA.forEach(pi=>playerTotals[pi]-=Math.abs(netSeg));}
   }
+
+  // Update F9 / B9 / TOT cells (separate totals table)
+  G.players.forEach((_,pi)=>{
+    const f9el=document.getElementById(`f9_${pi}`);
+    const b9el=document.getElementById(`b9_${pi}`);
+    const totel=document.getElementById(`tot18_${pi}`);
+    if(f9el) f9el.textContent=hasF9[pi]?grossF9[pi]:'—';
+    if(b9el) b9el.textContent=hasB9[pi]?grossB9[pi]:'—';
+    if(totel) totel.textContent=(hasF9[pi]||hasB9[pi])?(grossF9[pi]+grossB9[pi]):'—';
+  });
   const maxAmt=Math.max(...playerTotals);
   G.players.forEach((_,pi)=>{
     const el=document.getElementById(`grand_${pi}`);if(!el)return;
@@ -1015,7 +1075,20 @@ function recalc(){
 
 // ─── POPUP ────────────────────────────────
 function segForHole(h){return G.segments.findIndex(s=>s&&s.holes.includes(h));}
-function openPopup(h){popupHole=h;renderPopup();document.getElementById('popupOverlay').classList.add('open');}
+function openPopup(h){
+  popupHole=h;
+  // If this is the first hole of a new segment and no scores in that segment
+  // yet, reset its holeBets back to G.bet so each segment starts fresh
+  const segHoles=SEG_HOLES.find(sh=>sh.includes(h));
+  if(segHoles&&h===segHoles[0]){
+    const segUnplayed=segHoles.every(sh=>G.scores[sh]&&G.scores[sh].every(s=>s===null));
+    if(segUnplayed&&G.holeBets){
+      segHoles.forEach(sh=>{ G.holeBets[sh]=G.bet; });
+    }
+  }
+  renderPopup();
+  document.getElementById('popupOverlay').classList.add('open');
+}
 function closePopup(){document.getElementById('popupOverlay').classList.remove('open');}
 function overlayClick(e){if(e.target===document.getElementById('popupOverlay'))closePopup();}
 function popNav(d){const n=popupHole+d;if(n>=0&&n<G.holes){popupHole=n;renderPopup();}}
@@ -1046,7 +1119,9 @@ function renderPopup(){
     netInfo.textContent=stroke?'–1 stroke':'';
     const stepper=document.createElement('div');stepper.className='score-stepper';
     const minus=document.createElement('button');minus.className='step-btn';minus.textContent='−';minus.onclick=()=>adjustScore(h,pi,-1);
-    const valEl=document.createElement('div');valEl.id=`pv_${pi}`;valEl.className='step-val '+(score!==null?'':'empty');valEl.textContent=score!==null?score:'·';
+    const valEl=document.createElement('div');valEl.id=`pv_${pi}`;
+    valEl.className='step-val '+(score!==null?'':'empty');
+    valEl.textContent=score!==null?score:'·';
     const plus=document.createElement('button');plus.className='step-btn';plus.textContent='+';plus.onclick=()=>adjustScore(h,pi,1);
     const dot=document.createElement('div');dot.className='sdot';dot.id=`pd_${pi}`;updateDot(dot,score,par);
     stepper.appendChild(minus);stepper.appendChild(valEl);stepper.appendChild(plus);
@@ -1060,7 +1135,8 @@ function adjustScore(h,pi,delta){
   let next=cur===null?G.pars[h]:cur+delta;
   next=Math.max(1,Math.min(9,next));
   G.scores[h][pi]=next;
-  const v=document.getElementById(`pv_${pi}`);if(v){v.textContent=next;v.className='step-val';}
+  const v=document.getElementById(`pv_${pi}`);
+  if(v){v.textContent=next;v.className='step-val';}
   const d=document.getElementById(`pd_${pi}`);if(d)updateDot(d,next,G.pars[h]||4);
   recalc();
   saveGame();
@@ -1077,13 +1153,17 @@ function styleBetCell(cell, val){
 function adjustHoleBet(delta){
   const h=popupHole;
   if(!G.holeBets) G.holeBets=Array(G.holes).fill(G.bet);
+
+  // Find which segment this hole belongs to
+  const segHoles=SEG_HOLES.find(sh=>sh.includes(h))||[h];
+  const segEnd=segHoles[segHoles.length-1];
+
   let cur=G.holeBets[h]!=null?G.holeBets[h]:G.bet;
   cur=Math.max(0.5, Math.round((cur+delta)*2)/2);
 
-  // Set new amount as the default for this hole AND all subsequent holes
-  // that still matched the previous default (cascade forward)
+  // Cascade forward only within the current segment
   const oldDefault=G.holeBets[h]!=null?G.holeBets[h]:G.bet;
-  for(let i=h; i<G.holes; i++){
+  for(let i=h; i<=segEnd&&i<G.holes; i++){
     const existing=G.holeBets[i]!=null?G.holeBets[i]:G.bet;
     if(i===h||existing===oldDefault) G.holeBets[i]=cur;
   }
@@ -1266,17 +1346,6 @@ function exportToExcel(){
       gFront, gross18.map(v=>v??''), gBack, gTot
     ));
 
-    // Net
-    const net9  = holeNums9.map(h=>net(G.scores[h][pi],pi,h));
-    const net18 = holeNums18.map(h=>net(G.scores[h][pi],pi,h));
-    const nFront = net9.reduce((s,v)=>s+(v??0),0)||'';
-    const nBack  = net18.reduce((s,v)=>s+(v??0),0)||'';
-    const nTot   = (nFront||0)+(nBack||0)||'';
-    playerRows.push(makeRow(
-      `${name} — Net`,
-      net9.map(v=>v??''),
-      nFront, net18.map(v=>v??''), nBack, nTot
-    ));
   });
 
   // ── Vegas scoring rows per segment ──
