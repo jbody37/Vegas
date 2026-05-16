@@ -1,0 +1,25 @@
+{
+  "name": "Vegas 6-6-6 Golf Tracker",
+  "short_name": "Vegas 6-6-6",
+  "description": "Rotating team pairings golf betting game tracker",
+  "start_url": "/Vegas/",
+  "scope": "/Vegas/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1a0d",
+  "theme_color": "#0d1a0d",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
